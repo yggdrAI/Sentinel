@@ -1,0 +1,27 @@
+{
+  "name": "sentinel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SENTINEL — Real-Time Decision Intelligence Platform (Microsoft Innovate 2026 PS34)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @sentinel/api\" \"npm run dev -w @sentinel/web\"",
+    "build": "npm run build -w @sentinel/shared && npm run build -w @sentinel/api && npm run build -w @sentinel/web",
+    "test": "npm run test -w @sentinel/shared && npm run test -w @sentinel/api && npm run test -w @sentinel/web",
+    "test:e2e": "npm run test:e2e -w @sentinel/api",
+    "load-test": "npm run load-test -w @sentinel/api",
+    "start": "npm run start -w @sentinel/api",
+    "typecheck": "npm run build -w @sentinel/shared && npm run build -w @sentinel/api && npm run typecheck -w @sentinel/web",
+    "lint": "npm run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.8.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

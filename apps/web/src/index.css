@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --bg: #07090d;
+  --panel: #0c1017;
+  --line: rgba(125, 211, 199, 0.12);
+  --accent: #7dd3c7;
+  --live: #3dffa8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: "Instrument Sans", system-ui, sans-serif;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(125, 211, 199, 0.07), transparent 55%),
+    radial-gradient(900px 500px at 90% 0%, rgba(91, 156, 255, 0.06), transparent 50%),
+    linear-gradient(180deg, #07090d 0%, #0a0e14 100%);
+  color: #e8eef7;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 8px;
+}
+
+.maplibregl-popup-content {
+  background: #111722 !important;
+  color: #e8eef7 !important;
+  border: 1px solid rgba(125, 211, 199, 0.2);
+  border-radius: 8px !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45) !important;
+  padding: 10px 12px !important;
+  font-family: "Instrument Sans", sans-serif !important;
+}
+.maplibregl-popup-tip {
+  border-top-color: #111722 !important;
+}
