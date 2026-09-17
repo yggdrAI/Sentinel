@@ -68,11 +68,12 @@ export function AlertPanel({
                     {a.status}
                   </span>
                 </div>
-                <div className="mt-1 text-sm font-medium capitalize text-mist-100">
-                  {a.metric.replace(/_/g, " ")}
+                <div className="mt-1 text-sm font-medium text-mist-100">
+                  {a.title ?? a.metric.replace(/_/g, " ")}
                 </div>
                 <div className="font-mono text-[10px] capitalize text-mist-400">
                   {a.region} region · {a.service}
+                  {a.assigned_to ? ` · ${a.assigned_to}` : ""}
                 </div>
               </div>
               <div className="shrink-0 text-right font-mono text-[10px] text-mist-400">

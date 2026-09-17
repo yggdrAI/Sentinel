@@ -21,9 +21,66 @@ export type Severity = z.infer<typeof SeveritySchema>;
 export const AlertStatusSchema = z.enum([
   "ACTIVE",
   "ACKNOWLEDGED",
+  "ESCALATED",
   "RESOLVED",
 ]);
 export type AlertStatus = z.infer<typeof AlertStatusSchema>;
+
+export const AlertEvidenceSchema = z.object({
+  metric: z.string(),
+  value: z.number(),
+  threshold: z.number().nullable(),
+  baseline: z.number().nullable(),
+  z_score: z.number().nullable(),
+  percentage_deviation: z.number().nullable(),
+  persistence_ms: z.number().nullable(),
+  detection_level: z
+    .union([z.literal(1), z.literal(2), z.literal(3)])
+    .nullable(),
+  event_id: z.string().nullable(),
+  region: z.string(),
+  service: z.string(),
+});
+export type AlertEvidence = z.infer<typeof AlertEvidenceSchema>;
+
+export const AlertHistoryEntrySchema = z.object({
+  at: z.string(),
+  action: z.enum([
+    "CREATED",
+    "ACKNOWLEDGED",
+    "ASSIGNED",
+    "UNASSIGNED",
+    "ESCALATED",
+    "RESOLVED",
+  ]),
+  actor: z.string(),
+  note: z.string().optional(),
+});
+export type AlertHistoryEntry = z.infer<typeof AlertHistoryEntrySchema>;
+
+export const AuditActionSchema = z.enum([
+  "ALERT_CREATED",
+  "ALERT_ACKNOWLEDGED",
+  "ALERT_ASSIGNED",
+  "ALERT_UNASSIGNED",
+  "ALERT_ESCALATED",
+  "ALERT_RESOLVED",
+  "INCIDENT_CREATED",
+  "INCIDENT_UPDATED",
+  "INCIDENT_RESOLVED",
+]);
+export type AuditAction = z.infer<typeof AuditActionSchema>;
+
+export const AuditEventSchema = z.object({
+  id: z.string(),
+  timestamp: z.string(),
+  action: AuditActionSchema,
+  actor: z.string(),
+  entity_type: z.enum(["alert", "incident"]),
+  entity_id: z.string(),
+  metadata: z.record(z.unknown()).optional(),
+});
+export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
 export const PipelineStatusSchema = z.enum([
   "HEALTHY",
@@ -119,9 +176,19 @@ export type RiskScore = z.infer<typeof RiskScoreSchema>;
 
 export const AlertSchema = z.object({
   id: z.string(),
+  title: z.string(),
+  category: z.string(),
   created_at: z.string(),
+  updated_at: z.string(),
   acknowledged_at: z.string().nullable(),
+  escalated_at: z.string().nullable(),
   resolved_at: z.string().nullable(),
+  acknowledged_by: z.string().nullable(),
+  escalated_by: z.string().nullable(),
+  resolved_by: z.string().nullable(),
+  assigned_to: z.string().nullable(),
+  escalation_level: z.number().int().min(0),
+  escalation_reason: z.string().nullable(),
   severity: SeveritySchema,
   status: AlertStatusSchema,
   metric: z.string(),
@@ -134,6 +201,9 @@ export const AlertSchema = z.object({
   source: z.string(),
   risk_score: z.number(),
   affected_entity: z.string(),
+  related_incident_id: z.string().nullable(),
+  evidence: AlertEvidenceSchema.nullable(),
+  history: z.array(AlertHistoryEntrySchema),
 });
 export type Alert = z.infer<typeof AlertSchema>;
 
@@ -159,6 +229,7 @@ export const IncidentSchema = z.object({
   risk_score: z.number(),
   alert_ids: z.array(z.string()),
   related_alerts: z.array(z.string()),
+  triggering_alert_id: z.string().nullable(),
   status: IncidentStatusSchema,
 });
 export type Incident = z.infer<typeof IncidentSchema>;
@@ -289,6 +360,10 @@ export const WsMessageSchema = z.discriminatedUnion("type", [
     payload: IncidentSchema,
   }),
   z.object({
+    type: z.literal("audit"),
+    payload: AuditEventSchema,
+  }),
+  z.object({
     type: z.literal("health"),
     payload: PipelineHealthSchema,
   }),
@@ -336,6 +411,7 @@ export const WsMessageSchema = z.discriminatedUnion("type", [
       health: PipelineHealthSchema,
       alerts: z.array(AlertSchema),
       incidents: z.array(IncidentSchema),
+      audit: z.array(AuditEventSchema).optional(),
       timeseries: z.array(TimeSeriesPointSchema),
       regions: z.array(RegionStateSchema),
       risk: RiskScoreSchema,

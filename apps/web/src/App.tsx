@@ -94,7 +94,13 @@ export default function App() {
         {view === "alerts" && (
           <AlertCenter
             alerts={cc.alerts}
+            incidents={cc.incidents}
+            audit={cc.audit}
+            events={cc.eventHistory}
             onAcknowledge={cc.acknowledge}
+            onAssign={cc.assign}
+            onUnassign={cc.unassign}
+            onEscalate={cc.escalate}
             onResolve={cc.resolve}
           />
         )}

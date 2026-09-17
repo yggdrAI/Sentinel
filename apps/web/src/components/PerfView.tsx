@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { LoadTestResult } from "@sentinel/shared";
-import { runPerfTest } from "../lib/stream";
+import { runPerfTest } from "../lib/api";
 import { fmtNum } from "../lib/format";
 
 const TARGETS = [1000, 5000, 10000];

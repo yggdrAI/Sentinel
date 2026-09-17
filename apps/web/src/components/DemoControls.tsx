@@ -24,6 +24,15 @@ type Props = {
   onTrigger: (action: SimulationAction) => Promise<void>;
 };
 
+const MODE_FOR_ACTION: Record<SimulationAction, string> = {
+  normal: "NORMAL",
+  "high-load": "HIGH_LOAD",
+  anomaly: "ANOMALY",
+  incident: "INCIDENT",
+  failure: "PIPELINE_FAILURE",
+  recover: "NORMAL",
+};
+
 export function DemoControls({ simulation, mode, onTrigger }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,15 +63,7 @@ export function DemoControls({ simulation, mode, onTrigger }: Props) {
 
       <div className="flex flex-wrap gap-2">
         {ACTIONS.map((a) => {
-          const active = current.toLowerCase().includes(
-            a.action === "failure"
-              ? "pipeline"
-              : a.action === "high-load"
-                ? "high"
-                : a.action === "incident"
-                  ? "incident"
-                  : a.action
-          );
+          const active = current === MODE_FOR_ACTION[a.action];
           return (
             <button
               key={a.action}

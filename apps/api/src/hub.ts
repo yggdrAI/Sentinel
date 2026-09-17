@@ -83,6 +83,9 @@ export class SentinelHub extends EventEmitter {
     this.alerts.on("alert", (alert) => {
       this.emit("message", { type: "alert", payload: alert } satisfies WsMessage);
     });
+    this.alerts.on("audit", (audit) => {
+      this.emit("message", { type: "audit", payload: audit } satisfies WsMessage);
+    });
     this.alerts.on("incident", (incident) => {
       this.emit("message", {
         type: "incident",
@@ -163,6 +166,7 @@ export class SentinelHub extends EventEmitter {
       health,
       alerts: this.alerts.getAlerts(),
       incidents: this.alerts.getIncidents(),
+      audit: this.alerts.getAudit(100),
       timeseries: this.processor.getTimeSeries(),
       regions: this.buildRegions(),
       risk: this.lastRisk,

@@ -78,11 +78,22 @@ describe("commandReducer", () => {
   });
 
   it("upserts alerts from websocket", () => {
+    const now = new Date().toISOString();
     const alert = {
       id: "a1",
-      created_at: new Date().toISOString(),
+      title: "failure rate — north/payments",
+      category: "failure_rate",
+      created_at: now,
+      updated_at: now,
       acknowledged_at: null,
+      escalated_at: null,
       resolved_at: null,
+      acknowledged_by: null,
+      escalated_by: null,
+      resolved_by: null,
+      assigned_to: null,
+      escalation_level: 0,
+      escalation_reason: null,
       severity: "HIGH" as const,
       status: "ACTIVE" as const,
       metric: "failure_rate",
@@ -95,6 +106,11 @@ describe("commandReducer", () => {
       source: "test",
       risk_score: 70,
       affected_entity: "north/payments",
+      related_incident_id: null,
+      evidence: null,
+      history: [
+        { at: now, action: "CREATED" as const, actor: "system" },
+      ],
     };
     let s = commandReducer(initialCommandState, {
       type: "WS_MESSAGE",
@@ -107,6 +123,25 @@ describe("commandReducer", () => {
     });
     expect(s.alerts[0]?.status).toBe("ACKNOWLEDGED");
     expect(s.alerts).toHaveLength(1);
+  });
+
+  it("appends audit events from websocket", () => {
+    const s = commandReducer(initialCommandState, {
+      type: "WS_MESSAGE",
+      message: {
+        type: "audit",
+        payload: {
+          id: "aud1",
+          timestamp: new Date().toISOString(),
+          action: "ALERT_ESCALATED",
+          actor: "operator",
+          entity_type: "alert",
+          entity_id: "a1",
+        },
+      },
+    });
+    expect(s.audit).toHaveLength(1);
+    expect(s.audit[0]?.action).toBe("ALERT_ESCALATED");
   });
 
   it("reflects freshness SLA breach and recovery", () => {

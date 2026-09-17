@@ -1,5 +1,6 @@
 import type {
   Alert,
+  AuditEvent,
   DataFreshness,
   Incident,
   KpiSnapshot,
@@ -22,6 +23,7 @@ export type ConnectionStatus =
 export const MAX_EVENT_HISTORY = 80;
 export const MAX_TIMESERIES = 120;
 export const MAX_ALERTS = 200;
+export const MAX_AUDIT = 200;
 
 export type CommandState = {
   connection: ConnectionStatus;
@@ -30,6 +32,7 @@ export type CommandState = {
   freshness: DataFreshness | null;
   alerts: Alert[];
   incidents: Incident[];
+  audit: AuditEvent[];
   timeseries: TimeSeriesPoint[];
   risk: RiskScore | null;
   mode: SimulationMode;
@@ -48,6 +51,7 @@ export const initialCommandState: CommandState = {
   freshness: null,
   alerts: [],
   incidents: [],
+  audit: [],
   timeseries: [],
   risk: null,
   mode: "NORMAL",
@@ -92,6 +96,7 @@ export function commandReducer(
         freshness: action.payload.health.freshness,
         alerts: action.payload.alerts.slice(0, MAX_ALERTS),
         incidents: action.payload.incidents,
+        audit: (action.payload.audit ?? []).slice(0, MAX_AUDIT),
         timeseries: action.payload.timeseries.slice(-MAX_TIMESERIES),
         risk: action.payload.risk,
         mode: action.payload.mode,
@@ -122,6 +127,7 @@ function applyWsMessage(state: CommandState, msg: WsMessage): CommandState {
         freshness: msg.payload.health.freshness,
         alerts: msg.payload.alerts.slice(0, MAX_ALERTS),
         incidents: msg.payload.incidents,
+        audit: (msg.payload.audit ?? state.audit).slice(0, MAX_AUDIT),
         timeseries: msg.payload.timeseries.slice(-MAX_TIMESERIES),
         risk: msg.payload.risk,
       };
@@ -162,6 +168,13 @@ function applyWsMessage(state: CommandState, msg: WsMessage): CommandState {
       return {
         ...state,
         incidents: [msg.payload, ...rest].slice(0, 100),
+      };
+    }
+    case "audit": {
+      const rest = state.audit.filter((a) => a.id !== msg.payload.id);
+      return {
+        ...state,
+        audit: [msg.payload, ...rest].slice(0, MAX_AUDIT),
       };
     }
     case "event": {

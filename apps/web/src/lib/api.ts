@@ -1,5 +1,6 @@
 import type {
   Alert,
+  AuditEvent,
   DataFreshness,
   Incident,
   KpiSnapshot,
@@ -27,6 +28,7 @@ export type SnapshotResponse = {
   health: PipelineHealth;
   alerts: Alert[];
   incidents: Incident[];
+  audit?: AuditEvent[];
   timeseries: TimeSeriesPoint[];
   regions: RegionState[];
   risk: RiskScore;
@@ -41,11 +43,10 @@ export async function fetchSimulationStatus(): Promise<SimulationState> {
   return parse(await fetch("/simulation/status"));
 }
 
-export async function fetchFreshnessHealth(): Promise<PipelineHealth> {
-  return parse(await fetch("/health/stream"));
+export async function fetchAudit(limit = 100): Promise<AuditEvent[]> {
+  return parse(await fetch(`/api/audit?limit=${limit}`));
 }
 
-/** Maps UI demo actions to real backend simulation endpoints */
 export const SIMULATION_ENDPOINTS = {
   normal: "/simulation/normal",
   "high-load": "/simulation/high-load",
@@ -61,23 +62,92 @@ export async function triggerSimulation(action: SimulationAction): Promise<{
   ok: boolean;
   simulation: SimulationState;
 }> {
-  const path = SIMULATION_ENDPOINTS[action];
   return parse(
-    await fetch(path, {
+    await fetch(SIMULATION_ENDPOINTS[action], {
       method: "POST",
       headers: jsonHeaders,
     })
   );
 }
 
-export async function acknowledgeAlert(id: string): Promise<Alert> {
+export async function acknowledgeAlert(
+  id: string,
+  actor = "operator"
+): Promise<Alert> {
   return parse(
-    await fetch(`/api/alerts/${id}/acknowledge`, { method: "POST" })
+    await fetch(`/api/alerts/${id}/acknowledge`, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ actor }),
+    })
   );
 }
 
-export async function resolveAlert(id: string): Promise<Alert> {
-  return parse(await fetch(`/api/alerts/${id}/resolve`, { method: "POST" }));
+export async function assignAlert(
+  id: string,
+  assigned_to: string,
+  actor = "operator"
+): Promise<Alert> {
+  return parse(
+    await fetch(`/api/alerts/${id}/assign`, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ assigned_to, actor }),
+    })
+  );
+}
+
+export async function unassignAlert(
+  id: string,
+  actor = "operator"
+): Promise<Alert> {
+  return parse(
+    await fetch(`/api/alerts/${id}/unassign`, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ actor }),
+    })
+  );
+}
+
+export async function escalateAlert(
+  id: string,
+  reason: string,
+  actor = "operator"
+): Promise<Alert> {
+  return parse(
+    await fetch(`/api/alerts/${id}/escalate`, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ reason, actor }),
+    })
+  );
+}
+
+export async function resolveAlert(
+  id: string,
+  actor = "operator"
+): Promise<Alert> {
+  return parse(
+    await fetch(`/api/alerts/${id}/resolve`, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ actor }),
+    })
+  );
+}
+
+export async function runPerfTest(
+  target_eps: number,
+  duration_seconds = 3
+): Promise<unknown> {
+  return parse(
+    await fetch("/api/perf/run", {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ target_eps, duration_seconds }),
+    })
+  );
 }
 
 export type { DataFreshness, StreamEvent };

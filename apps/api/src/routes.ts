@@ -66,19 +66,103 @@ router.get("/api/alerts", (req, res) => {
 });
 
 router.post("/api/alerts/:id/acknowledge", (req, res) => {
-  const alert = hub.alerts.acknowledge(req.params.id);
-  if (!alert) return res.status(404).json({ error: "Alert not found or not active" });
+  const actor =
+    typeof req.body?.actor === "string" && req.body.actor.trim()
+      ? req.body.actor.trim()
+      : "operator";
+  const alert = hub.alerts.acknowledge(req.params.id, actor);
+  if (!alert)
+    return res
+      .status(404)
+      .json({ error: "Alert not found or not in ACTIVE status" });
+  return res.json(alert);
+});
+
+router.post("/api/alerts/:id/assign", (req, res) => {
+  const body = z
+    .object({
+      assigned_to: z.string().min(1).max(80),
+      actor: z.string().min(1).max(80).optional(),
+    })
+    .safeParse(req.body ?? {});
+  if (!body.success) {
+    return res.status(400).json({ error: body.error.flatten() });
+  }
+  const alert = hub.alerts.assign(
+    req.params.id,
+    body.data.assigned_to,
+    body.data.actor ?? "operator"
+  );
+  if (!alert)
+    return res.status(404).json({ error: "Alert not found or already resolved" });
+  return res.json(alert);
+});
+
+router.post("/api/alerts/:id/unassign", (req, res) => {
+  const actor =
+    typeof req.body?.actor === "string" && req.body.actor.trim()
+      ? req.body.actor.trim()
+      : "operator";
+  const alert = hub.alerts.unassign(req.params.id, actor);
+  if (!alert)
+    return res
+      .status(404)
+      .json({ error: "Alert not found, unresolved assignment, or resolved" });
+  return res.json(alert);
+});
+
+router.post("/api/alerts/:id/escalate", (req, res) => {
+  const body = z
+    .object({
+      reason: z.string().max(500).optional(),
+      actor: z.string().min(1).max(80).optional(),
+    })
+    .safeParse(req.body ?? {});
+  if (!body.success) {
+    return res.status(400).json({ error: body.error.flatten() });
+  }
+  const alert = hub.alerts.escalate(
+    req.params.id,
+    body.data.reason ?? "Operator escalation",
+    body.data.actor ?? "operator"
+  );
+  if (!alert)
+    return res.status(409).json({
+      error:
+        "Invalid transition — escalate requires ACTIVE or ACKNOWLEDGED status",
+    });
   return res.json(alert);
 });
 
 router.post("/api/alerts/:id/resolve", (req, res) => {
-  const alert = hub.alerts.resolve(req.params.id);
+  const actor =
+    typeof req.body?.actor === "string" && req.body.actor.trim()
+      ? req.body.actor.trim()
+      : "operator";
+  const alert = hub.alerts.resolve(req.params.id, actor);
   if (!alert) return res.status(404).json({ error: "Alert not found" });
   return res.json(alert);
 });
 
+router.get("/api/alerts/:id", (req, res) => {
+  const alert = hub.alerts.getAlert(req.params.id);
+  if (!alert) return res.status(404).json({ error: "Alert not found" });
+  return res.json(alert);
+});
+
+router.get("/api/audit", (req, res) => {
+  const limit = Math.min(500, Number(req.query.limit) || 100);
+  res.json(hub.alerts.getAudit(limit));
+});
+
 router.get("/api/incidents", (_req, res) => {
   res.json(hub.alerts.getIncidents());
+});
+
+router.get("/api/incidents/:id", (req, res) => {
+  const incident = hub.alerts.getIncident(req.params.id);
+  if (!incident) return res.status(404).json({ error: "Incident not found" });
+  return res.json(incident);
 });
 
 router.get("/api/regions", (_req, res) => {

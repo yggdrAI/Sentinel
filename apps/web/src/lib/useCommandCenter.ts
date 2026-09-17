@@ -2,9 +2,12 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { WsMessage } from "@sentinel/shared";
 import {
   acknowledgeAlert as apiAck,
+  assignAlert as apiAssign,
+  escalateAlert as apiEscalate,
   fetchSimulationStatus,
   fetchSnapshot,
   resolveAlert as apiResolve,
+  unassignAlert as apiUnassign,
   triggerSimulation,
   type SimulationAction,
 } from "./api";
@@ -16,11 +19,14 @@ import {
 
 const WS_URL =
   import.meta.env.VITE_WS_URL ||
-  `${location.protocol === "https:" ? "wss" : "ws"}://${location.hostname}:4000/ws`;
+  `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 
 export function useCommandCenter(): CommandState & {
   triggerDemo: (action: SimulationAction) => Promise<void>;
   acknowledge: (id: string) => Promise<void>;
+  assign: (id: string, assignee: string) => Promise<void>;
+  unassign: (id: string) => Promise<void>;
+  escalate: (id: string, reason: string) => Promise<void>;
   resolve: (id: string) => Promise<void>;
   refreshSimulation: () => Promise<void>;
 } {
@@ -151,6 +157,21 @@ export function useCommandCenter(): CommandState & {
     dispatch({ type: "UPSERT_ALERT", alert });
   }, []);
 
+  const assign = useCallback(async (id: string, assignee: string) => {
+    const alert = await apiAssign(id, assignee);
+    dispatch({ type: "UPSERT_ALERT", alert });
+  }, []);
+
+  const unassign = useCallback(async (id: string) => {
+    const alert = await apiUnassign(id);
+    dispatch({ type: "UPSERT_ALERT", alert });
+  }, []);
+
+  const escalate = useCallback(async (id: string, reason: string) => {
+    const alert = await apiEscalate(id, reason);
+    dispatch({ type: "UPSERT_ALERT", alert });
+  }, []);
+
   const resolve = useCallback(async (id: string) => {
     const alert = await apiResolve(id);
     dispatch({ type: "UPSERT_ALERT", alert });
@@ -160,6 +181,9 @@ export function useCommandCenter(): CommandState & {
     ...state,
     triggerDemo,
     acknowledge,
+    assign,
+    unassign,
+    escalate,
     resolve,
     refreshSimulation,
   };
