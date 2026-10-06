@@ -2,6 +2,8 @@
 
 Real-Time Decision Intelligence Platform for Microsoft Innovate 2026 — Problem Statement #34: **“Decisions While the Data’s Still Warm.”**
 
+Python/Streamlit sibling demo: **[PulseGuard](pulseguard/README.md)** (`cd pulseguard && python run.py`) — FastAPI + SQLite WAL + live fraud/risk thresholds + optional Fabric Eventstream sink.
+
 ## Problem statement
 
 Build a dashboard that automatically updates as new data arrives, shows live KPIs, and alerts when a value crosses a threshold — with incremental/streaming refresh, a visible data-freshness SLA, automated failure detection, and performance validation under concurrent load.

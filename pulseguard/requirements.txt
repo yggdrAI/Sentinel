@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+streamlit
+plotly
+python-dotenv
+pydantic
+httpx
+aiohttp
+pytest
+python-json-logger
