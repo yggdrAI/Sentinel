@@ -354,6 +354,17 @@ async def get_next() -> JSONResponse:
         raise HTTPException(status_code=204, detail="No buffered transactions available")
 
 
+@app.get("/batch", summary="Retrieve a batch of buffered transactions")
+async def get_batch(limit: int = 50) -> JSONResponse:
+    items = []
+    for _ in range(max(1, min(limit, 500))):
+        try:
+            items.append(simulator.queue.get_nowait())
+        except asyncio.QueueEmpty:
+            break
+    return JSONResponse(content=items)
+
+
 @app.get("/health", summary="Service health check")
 async def health_check() -> JSONResponse:
     healthy = simulator.running and simulator.mode != SimMode.PIPELINE_FAILURE
