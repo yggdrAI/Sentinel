@@ -6,3 +6,11 @@ dist/
 .DS_Store
 coverage/
 *.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+env/
+venv/
