@@ -2,8 +2,9 @@
 simulator/pbi_sender.py
 =======================
 Consumes transactions from the SENTINEL simulator, sends them
-to the Power BI Streaming Dataset Push URL, and runs a threshold
-detector that pushes high-risk transaction alerts to FLOW_ALERT_URL.
+to the Power BI Streaming Dataset Push URL, runs a threshold
+detector that pushes high-risk transaction alerts to FLOW_ALERT_URL,
+and persists transactions and alerts to Azure SQL in batches.
 
 Specifications:
   - Sends every 1 second, up to 50 transactions per batch to Power BI.
@@ -16,6 +17,11 @@ Specifications:
       * Cooldown: Max 1 alert per account per minute (60 seconds)
       * Dispatches to FLOW_ALERT_URL from .env
       * Logs every alert to logs/alerts.log
+  - Azure SQL persistence:
+      * Saves transactions and triggered alerts to Azure SQL using AZURE_SQL_CONN from .env
+      * Creates tables 'transactions' and 'alerts' if they don't exist, with 'ingest_latency_ms' column
+      * Inserts in batches
+      * If Azure is unreachable, logs the error and keeps the sender running
   - Logs sender batches to logs/sender.log.
 """
 
@@ -26,11 +32,18 @@ import logging
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 from dotenv import load_dotenv
+
+# Try importing pyodbc safely
+try:
+    import pyodbc
+except ImportError:
+    pyodbc = None
 
 # ---------------------------------------------------------------------------
 # Load Configuration
@@ -47,6 +60,7 @@ else:
 
 POWERBI_PUSH_URL = os.getenv("POWERBI_PUSH_URL", "").strip()
 FLOW_ALERT_URL = (os.getenv("FLOW_ALERT_URL") or os.getenv("POWER_AUTOMATE_WEBHOOK_URL") or "").strip()
+AZURE_SQL_CONN = os.getenv("AZURE_SQL_CONN", "").strip()
 SIMULATOR_URL = os.getenv("SIMULATOR_URL", "http://127.0.0.1:8001").rstrip("/")
 BATCH_SIZE = int(os.getenv("PBI_BATCH_SIZE", "50"))
 INTERVAL_SECONDS = float(os.getenv("PBI_INTERVAL_SECONDS", "1.0"))
@@ -114,6 +128,195 @@ alert_logger.addHandler(alert_stream_handler)
 
 
 # ---------------------------------------------------------------------------
+# Azure SQL Connection & Table Management
+# ---------------------------------------------------------------------------
+
+_azure_db_conn = None
+_azure_tables_verified = False
+
+
+def get_azure_db_connection():
+    """Retrieve or establish Azure SQL connection using pyodbc."""
+    global _azure_db_conn
+    if not AZURE_SQL_CONN:
+        return None
+
+    if pyodbc is None:
+        logger.error("[AZURE_SQL_ERROR] pyodbc is not installed. Run 'pip install pyodbc'.")
+        return None
+
+    if _azure_db_conn is not None:
+        try:
+            cursor = _azure_db_conn.cursor()
+            cursor.execute("SELECT 1")
+            return _azure_db_conn
+        except Exception:
+            _azure_db_conn = None
+
+    try:
+        _azure_db_conn = pyodbc.connect(AZURE_SQL_CONN, timeout=10)
+        return _azure_db_conn
+    except Exception as exc:
+        logger.error(f"[AZURE_SQL_ERROR] Failed to connect to Azure SQL: {exc}")
+        _azure_db_conn = None
+        return None
+
+
+def ensure_azure_tables(conn) -> bool:
+    """Creates tables 'transactions' and 'alerts' if they don't exist, ensuring ingest_latency_ms column."""
+    global _azure_tables_verified
+    if _azure_tables_verified:
+        return True
+
+    try:
+        cursor = conn.cursor()
+
+        # 1. Transactions table
+        cursor.execute("""
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'transactions')
+            BEGIN
+                CREATE TABLE transactions (
+                    txn_id VARCHAR(64) NOT NULL PRIMARY KEY,
+                    timestamp VARCHAR(64) NOT NULL,
+                    account_id VARCHAR(64) NOT NULL,
+                    merchant VARCHAR(128) NOT NULL,
+                    amount FLOAT NOT NULL,
+                    region VARCHAR(64) NOT NULL,
+                    channel VARCHAR(64) NOT NULL,
+                    risk_score FLOAT NOT NULL,
+                    ingest_latency_ms FLOAT NULL,
+                    created_at DATETIME2 DEFAULT SYSUTCDATETIME()
+                );
+            END
+            ELSE
+            BEGIN
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('transactions') AND name = 'ingest_latency_ms')
+                BEGIN
+                    ALTER TABLE transactions ADD ingest_latency_ms FLOAT NULL;
+                END
+            END
+        """)
+
+        # 2. Alerts table
+        cursor.execute("""
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'alerts')
+            BEGIN
+                CREATE TABLE alerts (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    account_id VARCHAR(64) NOT NULL,
+                    amount FLOAT NOT NULL,
+                    risk_score FLOAT NOT NULL,
+                    severity VARCHAR(32) NOT NULL,
+                    reason VARCHAR(512) NOT NULL,
+                    created_at VARCHAR(64) NULL,
+                    ingest_latency_ms FLOAT NULL
+                );
+            END
+            ELSE
+            BEGIN
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('alerts') AND name = 'ingest_latency_ms')
+                BEGIN
+                    ALTER TABLE alerts ADD ingest_latency_ms FLOAT NULL;
+                END
+            END
+        """)
+
+        conn.commit()
+        _azure_tables_verified = True
+        logger.info("[AZURE_SQL] Verified tables: 'transactions' and 'alerts' (with ingest_latency_ms)")
+        return True
+    except Exception as exc:
+        logger.error(f"[AZURE_SQL_ERROR] Table verification failed: {exc}")
+        return False
+
+
+def save_to_azure_sql(transactions: List[Dict[str, Any]], alerts: List[Dict[str, Any]]) -> None:
+    """
+    Saves batches of transactions and alerts to Azure SQL.
+    If Azure is unreachable, logs error and keeps sender running.
+    """
+    if not AZURE_SQL_CONN:
+        return
+
+    conn = get_azure_db_connection()
+    if conn is None:
+        return
+
+    if not ensure_azure_tables(conn):
+        return
+
+    try:
+        cursor = conn.cursor()
+
+        # Batch insert transactions
+        if transactions:
+            txn_rows = []
+            for t in transactions:
+                latency = float(t.get("ingest_latency_ms") or t.get("ingestion_latency_ms") or 0.0)
+                txn_rows.append((
+                    str(t.get("txn_id", "")),
+                    str(t.get("timestamp", "")),
+                    str(t.get("account_id", "")),
+                    str(t.get("merchant", "")),
+                    float(t.get("amount", 0.0)),
+                    str(t.get("region", "")),
+                    str(t.get("channel", "")),
+                    float(t.get("risk_score", 0.0)),
+                    latency,
+                ))
+
+            insert_txn_sql = """
+                INSERT INTO transactions (
+                    txn_id, timestamp, account_id, merchant, amount,
+                    region, channel, risk_score, ingest_latency_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            try:
+                cursor.fast_executemany = True
+            except Exception:
+                pass
+            cursor.executemany(insert_txn_sql, txn_rows)
+
+        # Batch insert alerts
+        if alerts:
+            alert_rows = []
+            for a in alerts:
+                latency = float(a.get("ingest_latency_ms", 0.0))
+                alert_rows.append((
+                    str(a.get("account_id", "")),
+                    float(a.get("amount", 0.0)),
+                    float(a.get("risk_score", 0.0)),
+                    str(a.get("severity", "")),
+                    str(a.get("reason", "")),
+                    str(a.get("created_at", "")),
+                    latency,
+                ))
+
+            insert_alert_sql = """
+                INSERT INTO alerts (
+                    account_id, amount, risk_score, severity, reason,
+                    created_at, ingest_latency_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """
+            try:
+                cursor.fast_executemany = True
+            except Exception:
+                pass
+            cursor.executemany(insert_alert_sql, alert_rows)
+
+        conn.commit()
+        logger.info(
+            f"[AZURE_SQL] Persisted {len(transactions)} transactions and {len(alerts)} alerts to database"
+        )
+    except Exception as exc:
+        logger.error(f"[AZURE_SQL_ERROR] Failed to save batch to Azure SQL: {exc}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # In-process generator fallback (if simulator API server is offline)
 # ---------------------------------------------------------------------------
 
@@ -168,7 +371,7 @@ def filter_transaction(txn: Dict[str, Any]) -> Dict[str, Any]:
 # Threshold Detector & Alert Dispatcher
 # ---------------------------------------------------------------------------
 
-def check_and_send_alerts(transactions: List[Dict[str, Any]]) -> None:
+def check_and_send_alerts(transactions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Scans transactions for risk_score > 80.
     Severity:
@@ -178,7 +381,10 @@ def check_and_send_alerts(transactions: List[Dict[str, Any]]) -> None:
       - Does not alert the same account more than once per minute (60s).
     Sends alert JSON (account_id, amount, risk_score, severity, reason) to FLOW_ALERT_URL.
     Logs every alert to logs/alerts.log.
+    Returns list of generated alert dictionaries for database storage.
     """
+    triggered_alerts: List[Dict[str, Any]] = []
+
     for txn in transactions:
         try:
             risk_score = float(txn.get("risk_score", 0.0))
@@ -199,6 +405,8 @@ def check_and_send_alerts(transactions: List[Dict[str, Any]]) -> None:
         severity = "critical" if risk_score > 90.0 else "warning"
         amount = round(float(txn.get("amount", 0.0)), 2)
         reason = f"Transaction risk score of {risk_score:.1f} exceeded threshold 80.0 (severity: {severity})"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        latency = float(txn.get("ingest_latency_ms") or txn.get("ingestion_latency_ms") or 0.0)
 
         alert_payload = {
             "account_id": account_id,
@@ -206,17 +414,23 @@ def check_and_send_alerts(transactions: List[Dict[str, Any]]) -> None:
             "risk_score": round(risk_score, 2),
             "severity": severity,
             "reason": reason,
+            "created_at": now_iso,
+            "ingest_latency_ms": latency,
         }
 
         # Mark cooldown timestamp
         _account_alert_cooldown[account_id] = now
+        triggered_alerts.append(alert_payload)
 
+        # Power Automate webhook dispatch
         dispatch_status = "NO_URL_CONFIGURED"
         if FLOW_ALERT_URL:
             try:
+                # Include uppercase 'Severity' as well for case-insensitive flow compatibility
+                webhook_body = {**alert_payload, "Severity": severity.upper()}
                 resp = requests.post(
                     FLOW_ALERT_URL,
-                    json=alert_payload,
+                    json=webhook_body,
                     headers={"Content-Type": "application/json"},
                     timeout=5.0,
                 )
@@ -229,6 +443,8 @@ def check_and_send_alerts(transactions: List[Dict[str, Any]]) -> None:
             f"[ALERT:{severity.upper()}] account_id={account_id} amount={amount:.2f} "
             f"risk_score={risk_score:.1f} reason='{reason}' dispatch={dispatch_status}"
         )
+
+    return triggered_alerts
 
 
 # ---------------------------------------------------------------------------
@@ -295,9 +511,10 @@ def send_batch_to_powerbi(batch: List[Dict[str, Any]]) -> bool:
 
 def run_sender():
     logger.info("=" * 60)
-    logger.info("SENTINEL Power BI Sender & Threshold Detector started")
+    logger.info("SENTINEL Power BI Sender & Azure SQL Pipeline started")
     logger.info(f"Power BI URL   : {POWERBI_PUSH_URL[:45]}..." if POWERBI_PUSH_URL else "No URL set")
     logger.info(f"Flow Alert URL : {FLOW_ALERT_URL[:45]}..." if FLOW_ALERT_URL else "No alert URL set")
+    logger.info(f"Azure SQL Conn : {'Configured' if AZURE_SQL_CONN else 'Not set (Azure SQL disabled)'}")
     logger.info(f"Batch size     : {BATCH_SIZE} transactions")
     logger.info(f"Send interval  : {INTERVAL_SECONDS}s")
     logger.info(f"Sender log     : {sender_log_file}")
@@ -321,7 +538,7 @@ def run_sender():
                 raw_txns = generate_local_transactions(count=BATCH_SIZE)
 
             # 2. Check for high-risk threshold breaches & dispatch alerts
-            check_and_send_alerts(raw_txns)
+            triggered_alerts = check_and_send_alerts(raw_txns)
 
             # 3. Filter strictly to allowed Power BI fields
             clean_batch = [filter_transaction(t) for t in raw_txns][:BATCH_SIZE]
@@ -333,7 +550,10 @@ def run_sender():
             else:
                 total_failed += len(clean_batch)
 
-            # 5. Sleep to maintain exactly 1-second interval
+            # 5. After sending each batch to Power BI, also save to Azure SQL
+            save_to_azure_sql(raw_txns, triggered_alerts)
+
+            # 6. Sleep to maintain exactly 1-second interval
             elapsed = time.monotonic() - start_time
             sleep_time = max(0.0, INTERVAL_SECONDS - elapsed)
             time.sleep(sleep_time)
